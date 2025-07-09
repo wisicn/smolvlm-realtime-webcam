@@ -2,7 +2,9 @@
 
 ![demo](./demo.png)
 
-This repository is a simple demo for how to use llama.cpp server with SmolVLM 500M to get real-time object detection
+This repository is a fork of the [simple demo](https://github.com/ngxson/smolvlm-realtime-webcam) for how to use llama.cpp server with SmolVLM 500M to get real-time object detection.
+
+Based on the upstream code, this repository adds the capability to optionally specify the LLM API key and model name, allowing the demo to work not only with the original `llama.cpp` but also with [Ollama](https://github.com/ollama/ollama/) together with [litellm proxy](https://github.com/BerriAI/litellm).
 
 ## How to setup
 
