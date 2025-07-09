@@ -26,10 +26,10 @@
         .io-areas {
             flex-direction: column;
             align-items: stretch;
+            gap: 15px; /* Added gap between sections */
         }
-        textarea {
-            width: 300px;
-            height: 80px;
+        textarea, input[type="text"] {
+            width: 40em;
             padding: 8px;
             border: 1px solid #ccc;
             border-radius: 4px;
@@ -67,6 +67,13 @@
         .hidden {
             display: none;
         }
+        .config-section {
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+        }
+        .config-section label[for] {
+            font-weight: normal; /* Make sub-labels normal weight */
+        }
     </style>
 </head>
 <body>
@@ -74,20 +81,33 @@
     <h1>Camera Interaction App</h1>
 
     <video id="videoFeed" autoplay playsinline></video>
-    <canvas id="canvas" class="hidden"></canvas> <!-- For capturing frames -->
-
-    <div class="io-areas">
+    <canvas id="canvas" class="hidden"></canvas> <div class="io-areas">
         <div>
             <label for="baseURL">Base API:</label><br>
-            <input id="baseURL" name="Instruction" value="http://localhost:8080"></textarea>
+            <input id="baseURL" name="baseURL" value="http://localhost:4000">
         </div>
-        <div>
+
+        <div class="config-section">
+            <input type="checkbox" id="authCheckbox" checked>
+            <label for="authCheckbox"><b>Enable Authorization</b></label><br>
+            <label for="apiKey">API Key:</label><br>
+            <input id="apiKey" type="text" value="sk-1234">
+        </div>
+
+        <div class="config-section">
+            <input type="checkbox" id="modelCheckbox" checked>
+            <label for="modelCheckbox"><b>Specify Model Name</b></label><br>
+            <label for="modelName">Model Name:</label><br>
+            <input id="modelName" type="text" value="ollama-gemma3">
+        </div>
+
+        <div class="config-section">
             <label for="instructionText">Instruction:</label><br>
-            <textarea id="instructionText" style="height: 2em; width: 40em" name="Instruction"></textarea>
+            <textarea id="instructionText" style="height: 2em;" name="Instruction"></textarea>
         </div>
         <div>
             <label for="responseText">Response:</label><br>
-            <textarea id="responseText" style="height: 2em; width: 40em" name="Response" readonly placeholder="Server response will appear here..."></textarea>
+            <textarea id="responseText" style="height: 4em;" name="Response" readonly placeholder="Server response will appear here..."></textarea>
         </div>
     </div>
 
@@ -104,6 +124,7 @@
     </div>
 
     <script>
+        // --- DOM Elements ---
         const video = document.getElementById('videoFeed');
         const canvas = document.getElementById('canvas');
         const baseURL = document.getElementById('baseURL');
@@ -111,41 +132,61 @@
         const responseText = document.getElementById('responseText');
         const intervalSelect = document.getElementById('intervalSelect');
         const startButton = document.getElementById('startButton');
+        const authCheckbox = document.getElementById('authCheckbox');
+        const apiKeyInput = document.getElementById('apiKey');
+        const modelCheckbox = document.getElementById('modelCheckbox');
+        const modelNameInput = document.getElementById('modelName');
 
-        instructionText.value = "What do you see?"; // default instruction
-
+        // --- State Variables ---
         let stream;
         let intervalId;
         let isProcessing = false;
 
+        // --- Initial Setup ---
+        instructionText.value = "What do you see?"; // Default instruction
+
+        // --- Functions ---
+
         // Returns response text (string)
         async function sendChatCompletionRequest(instruction, imageBase64URL) {
-            const response = await fetch(`${baseURL.value}/v1/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    max_tokens: 100,
-                    messages: [
-                        { role: 'user', content: [
-                            { type: 'text', text: instruction },
-                            { type: 'image_url', image_url: {
-                                url: imageBase64URL,
-                            } }
-                        ] },
-                    ]
-                })
-            });
-            if (!response.ok) {
-                const errorData = await response.text();
-                return `Server error: ${response.status} - ${errorData}`;
+            const headers = { 'Content-Type': 'application/json' };
+            if (authCheckbox.checked) {
+                headers['Authorization'] = `Bearer ${apiKeyInput.value}`;
             }
-            const data = await response.json();
-            return data.choices[0].message.content;
+
+            const requestBody = {
+                max_tokens: 100,
+                messages: [
+                    { role: 'user', content: [
+                        { type: 'text', text: instruction },
+                        { type: 'image_url', image_url: { url: imageBase64URL } }
+                    ] },
+                ],
+            };
+
+            if (modelCheckbox.checked) {
+                requestBody.model = modelNameInput.value;
+            }
+
+            try {
+                const response = await fetch(`${baseURL.value}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.text();
+                    return `Server error: ${response.status} - ${errorData}`;
+                }
+                const data = await response.json();
+                return data.choices[0].message.content;
+            } catch (error) {
+                 console.error('Fetch error:', error);
+                 return `Network or fetch error: ${error.message}`;
+            }
         }
 
-        // 1. Ask for camera permission on load
         async function initCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -153,8 +194,9 @@
                 responseText.value = "Camera access granted. Ready to start.";
             } catch (err) {
                 console.error("Error accessing camera:", err);
-                responseText.value = `Error accessing camera: ${err.name} - ${err.message}. Please ensure permissions are granted and you are on HTTPS or localhost.`;
-                alert(`Error accessing camera: ${err.name}. Make sure you've granted permission and are on HTTPS or localhost.`);
+                const errorMessage = `Error accessing camera: ${err.name}. Please grant permissions and use HTTPS or localhost.`;
+                responseText.value = errorMessage;
+                alert(errorMessage);
             }
         }
 
@@ -167,29 +209,22 @@
             canvas.height = video.videoHeight;
             const context = canvas.getContext('2d');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            return canvas.toDataURL('image/jpeg', 0.8); // Use JPEG for smaller size, 0.8 quality
+            return canvas.toDataURL('image/jpeg', 0.8);
         }
 
         async function sendData() {
-            if (!isProcessing) return; // Ensure we don't have overlapping requests if processing takes longer than interval
+            if (!isProcessing) return;
 
             const instruction = instructionText.value;
             const imageBase64URL = captureImage();
 
             if (!imageBase64URL) {
                 responseText.value = "Failed to capture image. Stream might not be active.";
-                // Optionally stop processing if image capture fails consistently
-                // handleStop();
                 return;
             }
 
-            const payload = {
-                instruction: instruction,
-                imageBase64URL: imageBase64URL
-            };
-
             try {
-                const response = await sendChatCompletionRequest(payload.instruction, payload.imageBase64URL);
+                const response = await sendChatCompletionRequest(instruction, imageBase64URL);
                 responseText.value = response;
             } catch (error) {
                 console.error('Error sending data:', error);
@@ -197,67 +232,69 @@
             }
         }
 
+        function setControlsState(enabled) {
+            instructionText.disabled = !enabled;
+            intervalSelect.disabled = !enabled;
+            baseURL.disabled = !enabled;
+            authCheckbox.disabled = !enabled;
+            modelCheckbox.disabled = !enabled;
+            
+            // Only re-enable inputs if their respective checkbox is checked
+            apiKeyInput.disabled = !enabled || !authCheckbox.checked;
+            modelNameInput.disabled = !enabled || !modelCheckbox.checked;
+        }
+
         function handleStart() {
             if (!stream) {
-                responseText.value = "Camera not available. Cannot start.";
                 alert("Camera not available. Please grant permission first.");
                 return;
             }
             isProcessing = true;
             startButton.textContent = "Stop";
-            startButton.classList.remove('start');
-            startButton.classList.add('stop');
-
-            instructionText.disabled = true;
-            intervalSelect.disabled = true;
-
+            startButton.classList.replace('start', 'stop');
+            setControlsState(false);
             responseText.value = "Processing started...";
-
             const intervalMs = parseInt(intervalSelect.value, 10);
-            
-            // Initial immediate call
-            sendData(); 
-            
-            // Then set interval
+            sendData(); // Initial immediate call
             intervalId = setInterval(sendData, intervalMs);
         }
 
         function handleStop() {
             isProcessing = false;
-            if (intervalId) {
-                clearInterval(intervalId);
-                intervalId = null;
-            }
+            if (intervalId) clearInterval(intervalId);
+            intervalId = null;
             startButton.textContent = "Start";
-            startButton.classList.remove('stop');
-            startButton.classList.add('start');
-
-            instructionText.disabled = false;
-            intervalSelect.disabled = false;
+            startButton.classList.replace('stop', 'start');
+            setControlsState(true);
             if (responseText.value.startsWith("Processing started...")) {
                 responseText.value = "Processing stopped.";
             }
         }
 
+        // --- Event Listeners ---
         startButton.addEventListener('click', () => {
-            if (isProcessing) {
-                handleStop();
-            } else {
-                handleStart();
-            }
+            if (isProcessing) handleStop();
+            else handleStart();
         });
 
-        // Initialize camera when the page loads
-        window.addEventListener('DOMContentLoaded', initCamera);
+        authCheckbox.addEventListener('change', () => {
+            apiKeyInput.disabled = !authCheckbox.checked;
+        });
 
-        // Optional: Stop stream when page is closed/navigated away to release camera
+        modelCheckbox.addEventListener('change', () => {
+            modelNameInput.disabled = !modelCheckbox.checked;
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initCamera();
+            // Set initial disabled state for inputs based on checkboxes
+            apiKeyInput.disabled = !authCheckbox.checked;
+            modelNameInput.disabled = !modelCheckbox.checked;
+        });
+
         window.addEventListener('beforeunload', () => {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
-            if (intervalId) {
-                clearInterval(intervalId);
-            }
+            if (stream) stream.getTracks().forEach(track => track.stop());
+            if (intervalId) clearInterval(intervalId);
         });
 
     </script>
